@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 dotenv = "0.15.0"
 regex = "1.5.4"
-serenity = {version="0.10.10",default-features=false,features=["builder", "cache", "client", "gateway", "http", "model", "utils", "rustls_backend","unstable_discord_api"]}
+serenity = {git="https://github.com/serenity-rs/serenity",branch="next",default-features=false,features=["builder", "cache", "client", "gateway", "http", "model", "utils", "rustls_backend","unstable_discord_api","voice"]}
+songbird = {git="https://github.com/serenity-rs/songbird",branch="next"}
 tokio = {version="1.17.0",features = ["macros", "rt-multi-thread"]}

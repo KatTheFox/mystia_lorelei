@@ -3,18 +3,19 @@ use std::env;
 use serenity::{
     async_trait,
     model::{
+        channel::Message,
         gateway::Ready,
         id::GuildId,
         interactions::{
             application_command::{
-                ApplicationCommand, ApplicationCommandInteractionDataOptionValue,
-                ApplicationCommandOptionType,
+                ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType,
             },
             Interaction, InteractionResponseType,
         },
     },
     prelude::*,
 };
+use songbird::SerenityInit;
 
 struct Handler;
 
@@ -23,24 +24,114 @@ impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
             let content = match command.data.name.as_str() {
-                "ping" => "Hey, I'm alive!".to_string(),
-                "id" => {
+                "join" => {
+                    let guild_id = command.guild_id.expect("invalid guild");
+                    let guild = guild_id
+                        .to_guild_cached(&ctx.cache)
+                        .expect("no guild found in cache");
+
+                    let channel_id = guild
+                        .voice_states
+                        .get(&command.user.id)
+                        .and_then(|voice_state| voice_state.channel_id);
+
+                    let connect_to = match channel_id {
+                        Some(channel) => channel,
+                        None => {
+                            check_msg(
+                                command
+                                    .channel_id
+                                    .send_message(&ctx.http, |f| {
+                                        f.content("not in a voice channel")
+                                    })
+                                    .await,
+                            );
+                            return;
+                        }
+                    };
+
+                    let manager = songbird::get(&ctx)
+                        .await
+                        .expect("Songbird Voice client placed in at initialisation.")
+                        .clone();
+
+                    let _handler = manager.join(guild_id, connect_to).await;
+
+                    "joined voice channel".to_string()
+                }
+                "play" => {
                     let options = command
                         .data
                         .options
                         .get(0)
-                        .expect("Expected user option")
+                        .expect("Expected attachment option")
                         .resolved
                         .as_ref()
-                        .expect("Expected user object");
+                        .expect("Expected attachment object");
+                    let guild_id = command.guild_id.expect("invalid guild");
 
-                    if let ApplicationCommandInteractionDataOptionValue::User(user, _member) =
+                    if let ApplicationCommandInteractionDataOptionValue::Attachment(attachment) =
                         options
                     {
-                        format!("{}'s id is {}", user.tag(), user.id)
+                        let manager = songbird::get(&ctx)
+                            .await
+                            .expect("Failed to get songbird manager")
+                            .clone();
+                        let handler_lock = match manager.get(guild_id) {
+                            Some(handler) => handler,
+                            None => {
+                                check_msg(
+                                    command
+                                        .channel_id
+                                        .send_message(&ctx.http, |f| {
+                                            f.content("not in voice channel and its line 87s fault")
+                                        })
+                                        .await,
+                                );
+
+                                return;
+                            }
+                        };
+                        let mut handler = handler_lock.lock().await;
+                        let source = match songbird::ytdl(&attachment.url).await {
+                            Ok(source) => source,
+                            Err(why) => {
+                                println!("Err starting source: {:?}", why);
+
+                                check_msg(
+                                    command
+                                        .channel_id
+                                        .send_message(&ctx.http, |f| f.content("ffmpeg error"))
+                                        .await,
+                                );
+                                return;
+                            }
+                        };
+
+                        handler
+                            .play_source(source)
+                            .set_volume(1.0f32)
+                            .expect("error playing track");
                     } else {
-                        "Please provide a valid user".to_string()
+                        check_msg(
+                            command
+                                .channel_id
+                                .send_message(&ctx.http, |f| {
+                                    f.content("please provide a valid attachment")
+                                })
+                                .await,
+                        );
                     }
+                    "playing song".to_string()
+                }
+                "stop" => {
+                    let guild_id = command.guild_id.expect("invalid guild");
+                    let manager = songbird::get(&ctx)
+                        .await
+                        .expect("Failed to get songbird manager")
+                        .clone();
+                    manager.leave(guild_id).await.expect("failed to leave vc");
+                    "bye :)".to_string()
                 }
                 _ => "not implemented :(".to_string(),
             };
@@ -54,6 +145,7 @@ impl EventHandler for Handler {
                 .await
             {
                 println!("Cannot respond to slash command: {}", why);
+                return;
             }
         }
     }
@@ -71,72 +163,25 @@ impl EventHandler for Handler {
         let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
             commands
                 .create_application_command(|command| {
-                    command.name("ping").description("A ping command")
-                })
-                .create_application_command(|command| {
                     command
-                        .name("id")
-                        .description("Get a user id")
+                        .name("join")
+                        .description("join a voice channel")
                         .create_option(|option| {
                             option
                                 .name("id")
-                                .description("The user to lookup")
-                                .kind(ApplicationCommandOptionType::User)
-                                .required(true)
+                                .description("the channel id to join")
+                                .kind(ApplicationCommandOptionType::Channel)
                         })
                 })
                 .create_application_command(|command| {
                     command
-                        .name("welcome")
-                        .description("Welcome a user")
+                        .name("play")
+                        .description("Play a song")
                         .create_option(|option| {
                             option
-                                .name("user")
-                                .description("The user to welcome")
-                                .kind(ApplicationCommandOptionType::User)
-                                .required(true)
-                        })
-                        .create_option(|option| {
-                            option
-                                .name("message")
-                                .description("The message to send")
-                                .kind(ApplicationCommandOptionType::String)
-                                .required(true)
-                                .add_string_choice(
-                                    "Welcome to our cool server! Ask me if you need help",
-                                    "pizza",
-                                )
-                                .add_string_choice("Hey, do you want a coffee?", "coffee")
-                                .add_string_choice(
-                                    "Welcome to the club, you're now a good person. Well, I hope.",
-                                    "club",
-                                )
-                                .add_string_choice(
-                                    "I hope that you brought a controller to play together!",
-                                    "game",
-                                )
-                        })
-                })
-                .create_application_command(|command| {
-                    command
-                        .name("numberinput")
-                        .description("Test command for number input")
-                        .create_option(|option| {
-                            option
-                                .name("int")
-                                .description("An integer from 5 to 10")
-                                .kind(ApplicationCommandOptionType::Integer)
-                                .min_int_value(5)
-                                .max_int_value(10)
-                                .required(true)
-                        })
-                        .create_option(|option| {
-                            option
-                                .name("number")
-                                .description("A float from -3.3 to 234.5")
-                                .kind(ApplicationCommandOptionType::Number)
-                                .min_number_value(-3.3)
-                                .max_number_value(234.5)
+                                .name("file")
+                                .description("The file to play")
+                                .kind(ApplicationCommandOptionType::Attachment)
                                 .required(true)
                         })
                 })
@@ -146,19 +191,6 @@ impl EventHandler for Handler {
         println!(
             "I now have the following guild slash commands: {:#?}",
             commands
-        );
-
-        let guild_command =
-            ApplicationCommand::create_global_application_command(&ctx.http, |command| {
-                command
-                    .name("wonderful_command")
-                    .description("An amazing command")
-            })
-            .await;
-
-        println!(
-            "I created the following global slash command: {:#?}",
-            guild_command
         );
     }
 }
@@ -181,6 +213,7 @@ async fn main() {
     let mut client = Client::builder(token)
         .event_handler(Handler)
         .application_id(application_id)
+        .register_songbird()
         .await
         .expect("Error creating client");
 
@@ -190,5 +223,11 @@ async fn main() {
     // exponential backoff until it reconnects.
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
+    }
+}
+/// Checks that a message successfully sent; if not, then logs why to stdout. Stolen from Songbird's example
+fn check_msg(result: serenity::Result<Message>) {
+    if let Err(why) = result {
+        println!("Error sending message: {:?}", why);
     }
 }
