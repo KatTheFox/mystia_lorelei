@@ -163,15 +163,7 @@ impl EventHandler for Handler {
         let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
             commands
                 .create_application_command(|command| {
-                    command
-                        .name("join")
-                        .description("join a voice channel")
-                        .create_option(|option| {
-                            option
-                                .name("id")
-                                .description("the channel id to join")
-                                .kind(ApplicationCommandOptionType::Channel)
-                        })
+                    command.name("join").description("join a voice channel")
                 })
                 .create_application_command(|command| {
                     command
