@@ -1,0 +1,12 @@
+[package]
+name = "mystia_lorelei"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dotenv = "0.15.0"
+regex = "1.5.4"
+serenity = {version="0.10.10",default-features=false,features=["builder", "cache", "client", "gateway", "http", "model", "utils", "rustls_backend","unstable_discord_api"]}
+tokio = {version="1.17.0",features = ["macros", "rt-multi-thread"]}
